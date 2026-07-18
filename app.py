@@ -49,14 +49,13 @@ def get_valid_access_token(user_id):
     ).fetchone()
 
     if not row:
-        return None  # คนนี้ยังไม่เคยยืนยันตัวตน
+        return None
 
     access_token, refresh_token, expires_at = row
 
     if time.time() < expires_at - 60:
-        return access_token  # ยังไม่หมดอายุ ใช้ต่อได้เลย
+        return access_token
 
-    # หมดอายุแล้ว ต้อง refresh
     res = requests.post(
         "https://discord.com/api/oauth2/token",
         data={
@@ -73,7 +72,7 @@ def get_valid_access_token(user_id):
     expires_in = data.get("expires_in")
 
     if not new_access:
-        return None  # refresh ไม่สำเร็จ (user อาจถอนสิทธิ์ไปแล้ว)
+        return None
 
     save_user_token(user_id, new_access, new_refresh, expires_in)
     return new_access
@@ -108,7 +107,7 @@ def get_all_verified_users():
     return [row[0] for row in rows]
 
 
-# ---------- ส่วนเว็บ Flask (สำหรับ OAuth) ----------
+# ---------- ส่วนเว็บ Flask (สำหรับ OAuth callback) ----------
 app = Flask(__name__)
 
 
@@ -117,31 +116,12 @@ def home():
     return "Bot verify server is running."
 
 
-@app.route("/verify")
-def verify():
-    verify_token = secrets.token_urlsafe(16)
-    pending_verifications[verify_token] = True
-
-    discord_auth_url = (
-        f"https://discord.com/api/oauth2/authorize"
-        f"?client_id={CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code"
-        f"&scope=identify+guilds.join"
-        f"&state={verify_token}"
-    )
-    return redirect(discord_auth_url)
-
-
 @app.route("/callback")
 def callback():
     code = request.args.get("code")
-    verify_token = request.args.get("state")
 
-    if not code or not verify_token or verify_token not in pending_verifications:
-        return "ลิงก์ไม่ถูกต้องหรือหมดอายุ", 400
-
-    pending_verifications.pop(verify_token, None)
+    if not code:
+        return "ไม่ได้รับอนุญาต", 400
 
     token_res = requests.post(
         "https://discord.com/api/oauth2/token",
@@ -188,10 +168,19 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+
+        direct_auth_url = (
+            f"https://discord.com/api/oauth2/authorize"
+            f"?client_id={CLIENT_ID}"
+            f"&redirect_uri={REDIRECT_URI}"
+            f"&response_type=code"
+            f"&scope=identify+guilds.join"
+        )
+
         self.add_item(discord.ui.Button(
             label="ยืนยันตัวตน",
             style=discord.ButtonStyle.link,
-            url=f"{REDIRECT_URI.replace('/callback', '')}/verify"
+            url=direct_auth_url
         ))
 
 
@@ -245,7 +234,7 @@ async def pullall(ctx, guild_id: str, role_id: str = None):
         else:
             fail_count += 1
             fail_list.append(f"{user_id}: {message}")
-        await asyncio.sleep(1)  # หน่วงกัน rate limit
+        await asyncio.sleep(1)
 
     result_text = f"✅ สำเร็จ {success_count} คน / ❌ ล้มเหลว {fail_count} คน"
     await ctx.send(result_text)
@@ -266,7 +255,6 @@ def run_bot():
     bot.run(BOT_TOKEN)
 
 
-# ---------- รันทั้งคู่พร้อมกัน ----------
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
