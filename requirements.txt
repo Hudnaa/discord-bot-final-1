@@ -2,3 +2,4 @@ flask
 requests
 discord.py
 gunicorn
+flask-limiter
