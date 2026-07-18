@@ -17,7 +17,10 @@ CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("REDIRECT_URI")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# ---------- ฐานข้อมูล (แชร์ระหว่างเว็บกับบอท) ----------
+# ใส่ Server ID ที่อนุญาตให้บอทอยู่ (กันคนอื่นเชิญบอทไปใช้)
+OWNER_GUILD_IDS = []  # เช่น [1111111111111111111, 2222222222222222222] — เว้นว่างไว้ = อนุญาตทุกที่
+
+# ---------- ฐานข้อมูล ----------
 conn = sqlite3.connect("data.db", check_same_thread=False)
 conn.execute("""
 CREATE TABLE IF NOT EXISTS user_tokens (
@@ -27,9 +30,13 @@ CREATE TABLE IF NOT EXISTS user_tokens (
     expires_at INTEGER NOT NULL
 )
 """)
+conn.execute("""
+CREATE TABLE IF NOT EXISTS guild_config (
+    guild_id TEXT PRIMARY KEY,
+    role_id TEXT NOT NULL
+)
+""")
 conn.commit()
-
-pending_verifications = {}
 
 
 def save_user_token(user_id, access_token, refresh_token, expires_in):
@@ -42,7 +49,6 @@ def save_user_token(user_id, access_token, refresh_token, expires_in):
 
 
 def get_valid_access_token(user_id):
-    """คืนค่า access_token ที่ยังไม่หมดอายุ — ถ้าหมดแล้วจะ refresh ให้อัตโนมัติ"""
     row = conn.execute(
         "SELECT access_token, refresh_token, expires_at FROM user_tokens WHERE user_id = ?",
         (user_id,)
@@ -107,7 +113,22 @@ def get_all_verified_users():
     return [row[0] for row in rows]
 
 
-# ---------- ส่วนเว็บ Flask (สำหรับ OAuth callback) ----------
+def set_guild_role(guild_id, role_id):
+    conn.execute(
+        "INSERT OR REPLACE INTO guild_config (guild_id, role_id) VALUES (?, ?)",
+        (str(guild_id), str(role_id))
+    )
+    conn.commit()
+
+
+def get_guild_role(guild_id):
+    row = conn.execute(
+        "SELECT role_id FROM guild_config WHERE guild_id = ?", (str(guild_id),)
+    ).fetchone()
+    return row[0] if row else None
+
+
+# ---------- ส่วนเว็บ Flask ----------
 app = Flask(__name__)
 
 
@@ -119,6 +140,7 @@ def home():
 @app.route("/callback")
 def callback():
     code = request.args.get("code")
+    guild_id = request.args.get("state")  # เซิร์ฟไหนที่กดปุ่มมา
 
     if not code:
         return "ไม่ได้รับอนุญาต", 400
@@ -150,6 +172,15 @@ def callback():
 
     save_user_token(user_id, access_token, refresh_token, expires_in)
 
+    # ถ้ารู้ว่ามาจากเซิร์ฟไหน ให้เพิ่มเข้าเซิร์ฟนั้น + แจกยศทันที
+    if guild_id:
+        role_id = get_guild_role(guild_id)
+        success, message = join_user_to_guild(user_id, guild_id, role_id)
+        if success:
+            return "ยืนยันตัวตนสำเร็จ! คุณได้รับยศและเข้าเซิร์ฟเรียบร้อยแล้ว 🎉"
+        else:
+            return f"ยืนยันตัวตนสำเร็จ แต่เพิ่มเข้าเซิร์ฟไม่สำเร็จ: {message}"
+
     return "ยืนยันตัวตนสำเร็จแล้ว! กลับไปที่ Discord ได้เลย 🎉"
 
 
@@ -161,12 +192,13 @@ def run_flask():
 # ---------- ส่วนบอท Discord ----------
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 class VerifyView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, guild_id):
         super().__init__(timeout=None)
 
         direct_auth_url = (
@@ -175,6 +207,7 @@ class VerifyView(discord.ui.View):
             f"&redirect_uri={REDIRECT_URI}"
             f"&response_type=code"
             f"&scope=identify+guilds.join"
+            f"&state={guild_id}"
         )
 
         self.add_item(discord.ui.Button(
@@ -187,26 +220,34 @@ class VerifyView(discord.ui.View):
 
 @bot.event
 async def on_ready():
-    bot.add_view(VerifyView())
     print(f"บอทออนไลน์แล้ว: {bot.user}")
 
 
+@bot.event
+async def on_guild_join(guild):
+    if OWNER_GUILD_IDS and guild.id not in OWNER_GUILD_IDS:
+        print(f"บอทถูกเชิญเข้าเซิร์ฟที่ไม่อนุญาต: {guild.name} ({guild.id}) — กำลังออก...")
+        await guild.leave()
+
+
 @bot.command()
-@commands.has_permissions(administrator=True)
-async def setup_verify(ctx):
+@commands.is_owner()
+async def setup_verify(ctx, role: discord.Role):
+    set_guild_role(ctx.guild.id, role.id)
+
     embed = discord.Embed(
         title="🔐 ยืนยันตัวตนก่อนเข้าใช้งาน",
         description=(
             "**ยินดีต้อนรับสู่เซิร์ฟเวอร์!** 🎉\n\n"
             "กรุณากดปุ่มด้านล่างเพื่อยืนยันตัวตนของคุณ\n"
-            "ก่อนที่จะสามารถเข้าถึงช่องอื่น ๆ ในเซิร์ฟเวอร์นี้ได้"
+            f"เมื่อยืนยันสำเร็จ คุณจะได้รับยศ {role.mention} ทันที"
         ),
         color=discord.Color.blurple()
     )
 
     embed.add_field(
         name="📋 ขั้นตอน",
-        value="1️⃣ กดปุ่ม **ยืนยันตัวตน**\n2️⃣ กด **Authorize**\n3️⃣ เสร็จสิ้น!",
+        value="1️⃣ กดปุ่ม **ยืนยันตัวตน**\n2️⃣ กด **Authorize**\n3️⃣ รับยศทันที!",
         inline=False
     )
     embed.add_field(
@@ -228,11 +269,11 @@ async def setup_verify(ctx):
     )
     embed.timestamp = discord.utils.utcnow()
 
-    await ctx.send(embed=embed, view=VerifyView())
+    await ctx.send(embed=embed, view=VerifyView(ctx.guild.id))
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@commands.is_owner()
 async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
     success, message = join_user_to_guild(str(member.id), guild_id, role_id)
     if success:
@@ -242,7 +283,7 @@ async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@commands.is_owner()
 async def pullall(ctx, guild_id: str, role_id: str = None):
     user_ids = get_all_verified_users()
     total = len(user_ids)
@@ -275,7 +316,7 @@ async def pullall(ctx, guild_id: str, role_id: str = None):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@commands.is_owner()
 async def countverified(ctx):
     count = len(get_all_verified_users())
     await ctx.send(f"มีผู้ยืนยันตัวตนแล้วทั้งหมด {count} คน")
