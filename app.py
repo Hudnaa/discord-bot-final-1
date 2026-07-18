@@ -179,6 +179,7 @@ class VerifyView(discord.ui.View):
 
         self.add_item(discord.ui.Button(
             label="ยืนยันตัวตน",
+            emoji="✅",
             style=discord.ButtonStyle.link,
             url=direct_auth_url
         ))
@@ -194,10 +195,39 @@ async def on_ready():
 @commands.has_permissions(administrator=True)
 async def setup_verify(ctx):
     embed = discord.Embed(
-        title="⚠️ กรุณารับยศก่อนเข้าเซิร์ฟ",
-        description="กดปุ่มด้านล่างเพื่อยืนยันตัวตนก่อนเข้าใช้งาน",
-        color=discord.Color.orange()
+        title="🔐 ยืนยันตัวตนก่อนเข้าใช้งาน",
+        description=(
+            "**ยินดีต้อนรับสู่เซิร์ฟเวอร์!** 🎉\n\n"
+            "กรุณากดปุ่มด้านล่างเพื่อยืนยันตัวตนของคุณ\n"
+            "ก่อนที่จะสามารถเข้าถึงช่องอื่น ๆ ในเซิร์ฟเวอร์นี้ได้"
+        ),
+        color=discord.Color.blurple()
     )
+
+    embed.add_field(
+        name="📋 ขั้นตอน",
+        value="1️⃣ กดปุ่ม **ยืนยันตัวตน**\n2️⃣ กด **Authorize**\n3️⃣ เสร็จสิ้น!",
+        inline=False
+    )
+    embed.add_field(
+        name="🔒 ความปลอดภัย",
+        value="ไม่มีการเก็บรหัสผ่านของคุณ ใช้เวลาไม่ถึง 10 วินาที",
+        inline=False
+    )
+
+    if ctx.guild.icon:
+        embed.set_thumbnail(url=ctx.guild.icon.url)
+
+    embed.set_image(
+        url="https://cdn.discordapp.com/attachments/1528016838842122344/1528149105543745758/file_0000000038447209a7fe0ab84d413e2a.png"
+    )
+
+    embed.set_footer(
+        text=f"{ctx.guild.name} • ระบบยืนยันตัวตน",
+        icon_url=ctx.guild.icon.url if ctx.guild.icon else None
+    )
+    embed.timestamp = discord.utils.utcnow()
+
     await ctx.send(embed=embed, view=VerifyView())
 
 
