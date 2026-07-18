@@ -132,7 +132,6 @@ def get_guild_role(guild_id):
 # ---------- ส่วนเว็บ Flask ----------
 app = Flask(__name__)
 
-# ป้องกันการยิงถล่ม (Rate Limiting)
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -146,7 +145,7 @@ def home():
 
 
 @app.route("/callback")
-@limiter.limit("10 per minute")  # จำกัดเข้มขึ้นเฉพาะ endpoint สำคัญ
+@limiter.limit("10 per minute")
 def callback():
     code = request.args.get("code")
     guild_id = request.args.get("state")
@@ -243,8 +242,25 @@ async def on_guild_join(guild):
         await guild.leave()
 
 
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้ (ต้องเป็นแอดมินเท่านั้น)")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ ใส่ข้อมูลไม่ครบ: ขาด `{error.param.name}`")
+    elif isinstance(error, commands.RoleNotFound):
+        await ctx.send(f"❌ ไม่พบยศที่ระบุ: {error.argument}")
+    elif isinstance(error, commands.MemberNotFound):
+        await ctx.send(f"❌ ไม่พบสมาชิกที่ระบุ: {error.argument}")
+    elif isinstance(error, commands.CommandNotFound):
+        pass
+    else:
+        await ctx.send(f"❌ เกิดข้อผิดพลาด: `{error}`")
+        print(f"Unhandled error: {error}")
+
+
 @bot.command()
-@commands.is_owner()
+@commands.has_permissions(administrator=True)
 async def setup_verify(ctx, role: discord.Role):
     set_guild_role(ctx.guild.id, role.id)
 
@@ -286,7 +302,7 @@ async def setup_verify(ctx, role: discord.Role):
 
 
 @bot.command()
-@commands.is_owner()
+@commands.has_permissions(administrator=True)
 async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
     success, message = join_user_to_guild(str(member.id), guild_id, role_id)
     if success:
@@ -296,7 +312,7 @@ async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
 
 
 @bot.command()
-@commands.is_owner()
+@commands.has_permissions(administrator=True)
 async def pullall(ctx, guild_id: str, role_id: str = None):
     user_ids = get_all_verified_users()
     total = len(user_ids)
@@ -329,7 +345,7 @@ async def pullall(ctx, guild_id: str, role_id: str = None):
 
 
 @bot.command()
-@commands.is_owner()
+@commands.has_permissions(administrator=True)
 async def countverified(ctx):
     count = len(get_all_verified_users())
     await ctx.send(f"มีผู้ยืนยันตัวตนแล้วทั้งหมด {count} คน")
