@@ -7,6 +7,8 @@ import secrets
 
 import requests
 from flask import Flask, request, redirect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 import discord
 from discord.ext import commands
@@ -17,8 +19,7 @@ CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("REDIRECT_URI")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# ใส่ Server ID ที่อนุญาตให้บอทอยู่ (กันคนอื่นเชิญบอทไปใช้)
-OWNER_GUILD_IDS = []  # เช่น [1111111111111111111, 2222222222222222222] — เว้นว่างไว้ = อนุญาตทุกที่
+OWNER_GUILD_IDS = []  # เช่น [1111111111111111111] — เว้นว่าง = อนุญาตทุกที่
 
 # ---------- ฐานข้อมูล ----------
 conn = sqlite3.connect("data.db", check_same_thread=False)
@@ -131,6 +132,13 @@ def get_guild_role(guild_id):
 # ---------- ส่วนเว็บ Flask ----------
 app = Flask(__name__)
 
+# ป้องกันการยิงถล่ม (Rate Limiting)
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["30 per minute"]
+)
+
 
 @app.route("/")
 def home():
@@ -138,9 +146,10 @@ def home():
 
 
 @app.route("/callback")
+@limiter.limit("10 per minute")  # จำกัดเข้มขึ้นเฉพาะ endpoint สำคัญ
 def callback():
     code = request.args.get("code")
-    guild_id = request.args.get("state")  # เซิร์ฟไหนที่กดปุ่มมา
+    guild_id = request.args.get("state")
 
     if not code:
         return "ไม่ได้รับอนุญาต", 400
@@ -172,7 +181,6 @@ def callback():
 
     save_user_token(user_id, access_token, refresh_token, expires_in)
 
-    # ถ้ารู้ว่ามาจากเซิร์ฟไหน ให้เพิ่มเข้าเซิร์ฟนั้น + แจกยศทันที
     if guild_id:
         role_id = get_guild_role(guild_id)
         success, message = join_user_to_guild(user_id, guild_id, role_id)
@@ -182,6 +190,11 @@ def callback():
             return f"ยืนยันตัวตนสำเร็จ แต่เพิ่มเข้าเซิร์ฟไม่สำเร็จ: {message}"
 
     return "ยืนยันตัวตนสำเร็จแล้ว! กลับไปที่ Discord ได้เลย 🎉"
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return "คำขอถี่เกินไป กรุณาลองใหม่ภายหลัง", 429
 
 
 def run_flask():
