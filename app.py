@@ -19,7 +19,15 @@ CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("REDIRECT_URI")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-OWNER_GUILD_IDS = []  # เช่น [1111111111111111111] — เว้นว่าง = อนุญาตทุกที่
+OWNER_GUILD_IDS = []
+
+AUTHORIZED_USER_IDS = [1526937904423764030, 1526503693690601592]
+
+def is_authorized():
+    async def predicate(ctx):
+        return ctx.author.id in AUTHORIZED_USER_IDS
+    return commands.check(predicate)
+
 
 # ---------- ฐานข้อมูล ----------
 conn = sqlite3.connect("data.db", check_same_thread=False)
@@ -184,9 +192,9 @@ def callback():
         role_id = get_guild_role(guild_id)
         success, message = join_user_to_guild(user_id, guild_id, role_id)
         if success:
-            return "ยืนยันตัวตนสำเร็จ! คุณได้รับยศและเข้าเซิร์ฟเรียบร้อยแล้ว 🎉"
+            return "รับยศสำเร็จแล้ว! กลับไปที่ Discord ได้เลย 🎉"
         else:
-            return f"ยืนยันตัวตนสำเร็จ แต่เพิ่มเข้าเซิร์ฟไม่สำเร็จ: {message}"
+            return f"ยืนยันตัวตนสำเร็จ แต่รับยศไม่สำเร็จ: {message}"
 
     return "ยืนยันตัวตนสำเร็จแล้ว! กลับไปที่ Discord ได้เลย 🎉"
 
@@ -223,7 +231,7 @@ class VerifyView(discord.ui.View):
         )
 
         self.add_item(discord.ui.Button(
-            label="ยืนยันตัวตน",
+            label="รับยศ",
             emoji="✅",
             style=discord.ButtonStyle.link,
             url=direct_auth_url
@@ -244,8 +252,8 @@ async def on_guild_join(guild):
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้ (ต้องเป็นแอดมินเท่านั้น)")
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้")
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(f"❌ ใส่ข้อมูลไม่ครบ: ขาด `{error.param.name}`")
     elif isinstance(error, commands.RoleNotFound):
@@ -260,29 +268,16 @@ async def on_command_error(ctx, error):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def setup_verify(ctx, role: discord.Role):
     set_guild_role(ctx.guild.id, role.id)
 
     embed = discord.Embed(
-        title="🔐 ยืนยันตัวตนก่อนเข้าใช้งาน",
+        title="🔐 รับยศ",
         description=(
-            "**ยินดีต้อนรับสู่เซิร์ฟเวอร์!** 🎉\n\n"
-            "กรุณากดปุ่มด้านล่างเพื่อยืนยันตัวตนของคุณ\n"
-            f"เมื่อยืนยันสำเร็จ คุณจะได้รับยศ {role.mention} ทันที"
+            f"กดปุ่มด้านล่างเลยKub กดรับยศจะได้ยศ {role.mention}"
         ),
         color=discord.Color.blurple()
-    )
-
-    embed.add_field(
-        name="📋 ขั้นตอน",
-        value="1️⃣ กดปุ่ม **ยืนยันตัวตน**\n2️⃣ กด **Authorize**\n3️⃣ รับยศทันที!",
-        inline=False
-    )
-    embed.add_field(
-        name="🔒 ความปลอดภัย",
-        value="ไม่มีการเก็บรหัสผ่านของคุณ ใช้เวลาไม่ถึง 10 วินาที",
-        inline=False
     )
 
     if ctx.guild.icon:
@@ -302,7 +297,7 @@ async def setup_verify(ctx, role: discord.Role):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
     success, message = join_user_to_guild(str(member.id), guild_id, role_id)
     if success:
@@ -312,7 +307,7 @@ async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def pullall(ctx, guild_id: str, role_id: str = None):
     user_ids = get_all_verified_users()
     total = len(user_ids)
@@ -345,7 +340,7 @@ async def pullall(ctx, guild_id: str, role_id: str = None):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def countverified(ctx):
     count = len(get_all_verified_users())
     await ctx.send(f"มีผู้ยืนยันตัวตนแล้วทั้งหมด {count} คน")
