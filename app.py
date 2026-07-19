@@ -338,6 +338,32 @@ async def countverified(ctx):
     await ctx.send(f"มีผู้ยืนยันตัวตนแล้วทั้งหมด {count} คน")
 
 
+@bot.command()
+@is_authorized()
+async def removerole(ctx, role: discord.Role):
+    members_with_role = [m for m in ctx.guild.members if role in m.roles]
+    total = len(members_with_role)
+
+    if total == 0:
+        await ctx.send(f"ไม่มีใครมียศ {role.mention} เลยตอนนี้")
+        return
+
+    await ctx.send(f"กำลังลบยศ {role.mention} ออกจาก {total} คน...")
+
+    success_count = 0
+    fail_count = 0
+
+    for member in members_with_role:
+        try:
+            await member.remove_roles(role)
+            success_count += 1
+        except Exception:
+            fail_count += 1
+        await asyncio.sleep(0.5)
+
+    await ctx.send(f"✅ ลบยศออกสำเร็จ {success_count} คน / ❌ ล้มเหลว {fail_count} คน")
+
+
 def run_bot():
     bot.run(BOT_TOKEN)
 
