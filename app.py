@@ -29,7 +29,7 @@ def is_authorized():
     return commands.check(predicate)
 
 
-# ---------- ฐานข้อมูล ----------
+# ---------- ฐานข้อมูล (ใช้เก็บแค่ token ผู้ใช้ ไม่ต้องพึ่ง guild_config อีกแล้ว) ----------
 conn = sqlite3.connect("data.db", check_same_thread=False)
 conn.execute("""
 CREATE TABLE IF NOT EXISTS user_tokens (
@@ -37,12 +37,6 @@ CREATE TABLE IF NOT EXISTS user_tokens (
     access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL,
     expires_at INTEGER NOT NULL
-)
-""")
-conn.execute("""
-CREATE TABLE IF NOT EXISTS guild_config (
-    guild_id TEXT PRIMARY KEY,
-    role_id TEXT NOT NULL
 )
 """)
 conn.commit()
@@ -122,21 +116,6 @@ def get_all_verified_users():
     return [row[0] for row in rows]
 
 
-def set_guild_role(guild_id, role_id):
-    conn.execute(
-        "INSERT OR REPLACE INTO guild_config (guild_id, role_id) VALUES (?, ?)",
-        (str(guild_id), str(role_id))
-    )
-    conn.commit()
-
-
-def get_guild_role(guild_id):
-    row = conn.execute(
-        "SELECT role_id FROM guild_config WHERE guild_id = ?", (str(guild_id),)
-    ).fetchone()
-    return row[0] if row else None
-
-
 # ---------- ส่วนเว็บ Flask ----------
 app = Flask(__name__)
 
@@ -156,10 +135,15 @@ def home():
 @limiter.limit("10 per minute")
 def callback():
     code = request.args.get("code")
-    guild_id = request.args.get("state")
+    state = request.args.get("state")
 
     if not code:
         return "ไม่ได้รับอนุญาต", 400
+
+    guild_id = None
+    role_id = None
+    if state and ":" in state:
+        guild_id, role_id = state.split(":", 1)
 
     token_res = requests.post(
         "https://discord.com/api/oauth2/token",
@@ -189,7 +173,6 @@ def callback():
     save_user_token(user_id, access_token, refresh_token, expires_in)
 
     if guild_id:
-        role_id = get_guild_role(guild_id)
         success, message = join_user_to_guild(user_id, guild_id, role_id)
         if success:
             return "รับยศสำเร็จแล้ว! กลับไปที่ Discord ได้เลย 🎉"
@@ -218,8 +201,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 class VerifyView(discord.ui.View):
-    def __init__(self, guild_id):
+    def __init__(self, guild_id, role_id):
         super().__init__(timeout=None)
+
+        state_value = f"{guild_id}:{role_id}"
 
         direct_auth_url = (
             f"https://discord.com/api/oauth2/authorize"
@@ -227,7 +212,7 @@ class VerifyView(discord.ui.View):
             f"&redirect_uri={REDIRECT_URI}"
             f"&response_type=code"
             f"&scope=identify+guilds.join"
-            f"&state={guild_id}"
+            f"&state={state_value}"
         )
 
         self.add_item(discord.ui.Button(
@@ -270,13 +255,9 @@ async def on_command_error(ctx, error):
 @bot.command()
 @is_authorized()
 async def setup_verify(ctx, role: discord.Role):
-    set_guild_role(ctx.guild.id, role.id)
-
     embed = discord.Embed(
         title="🔐 รับยศ",
-        description=(
-            f"กดปุ่มด้านล่างเลยKub กดรับยศจะได้ยศ {role.mention}"
-        ),
+        description=f"กดปุ่มด้านล่างเลยKub กดรับยศจะได้ยศ {role.mention}",
         color=discord.Color.blurple()
     )
 
@@ -286,14 +267,13 @@ async def setup_verify(ctx, role: discord.Role):
     embed.set_image(
         url="https://cdn.discordapp.com/attachments/1528016838842122344/1528149105543745758/file_0000000038447209a7fe0ab84d413e2a.png"
     )
-
     embed.set_footer(
         text=f"{ctx.guild.name} • ระบบยืนยันตัวตน",
         icon_url=ctx.guild.icon.url if ctx.guild.icon else None
     )
     embed.timestamp = discord.utils.utcnow()
 
-    await ctx.send(embed=embed, view=VerifyView(ctx.guild.id))
+    await ctx.send(embed=embed, view=VerifyView(ctx.guild.id, role.id))
 
 
 @bot.command()
