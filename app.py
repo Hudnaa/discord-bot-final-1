@@ -29,7 +29,7 @@ def is_authorized():
     return commands.check(predicate)
 
 
-# ---------- ฐานข้อมูล (ใช้เก็บแค่ token ผู้ใช้ ไม่ต้องพึ่ง guild_config อีกแล้ว) ----------
+# ---------- ฐานข้อมูล ----------
 conn = sqlite3.connect("data.db", check_same_thread=False)
 conn.execute("""
 CREATE TABLE IF NOT EXISTS user_tokens (
@@ -105,10 +105,22 @@ def join_user_to_guild(user_id, guild_id, role_id=None):
         json=payload,
     )
 
-    if res.status_code in (201, 204):
-        return True, "สำเร็จ"
-    else:
-        return False, f"{res.status_code} {res.text}"
+    debug_msg = f"[ขั้น1 เพิ่มเข้าเซิร์ฟ] status={res.status_code} body={res.text[:200]}"
+
+    if res.status_code not in (201, 204):
+        return False, debug_msg
+
+    if role_id:
+        role_res = requests.put(
+            f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{role_id}",
+            headers={"Authorization": f"Bot {BOT_TOKEN}"},
+        )
+        debug_msg += f" | [ขั้น2 ใส่ยศ] status={role_res.status_code} body={role_res.text[:200]}"
+
+        if role_res.status_code != 204:
+            return False, debug_msg
+
+    return True, debug_msg
 
 
 def get_all_verified_users():
@@ -281,7 +293,7 @@ async def setup_verify(ctx, role: discord.Role):
 async def pull(ctx, member: discord.Member, guild_id: str, role_id: str = None):
     success, message = join_user_to_guild(str(member.id), guild_id, role_id)
     if success:
-        await ctx.send(f"✅ ดึง {member.mention} เข้าเซิร์ฟ `{guild_id}` สำเร็จแล้ว")
+        await ctx.send(f"✅ ดึง {member.mention} เข้าเซิร์ฟ `{guild_id}` สำเร็จแล้ว\n`{message}`")
     else:
         await ctx.send(f"❌ ล้มเหลว: {message}")
 
@@ -315,8 +327,8 @@ async def pullall(ctx, guild_id: str, role_id: str = None):
     await ctx.send(result_text)
 
     if fail_list:
-        chunk = "\n".join(fail_list[:10])
-        await ctx.send(f"ตัวอย่างที่ล้มเหลว:\n```{chunk}```")
+        chunk = "\n".join(fail_list[:5])
+        await ctx.send(f"รายละเอียด:\n```{chunk}```")
 
 
 @bot.command()
