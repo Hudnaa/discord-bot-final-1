@@ -14,7 +14,6 @@ from flask_limiter.util import get_remote_address
 import discord
 from discord.ext import commands
 
-# ---------- ค่าคงที่จาก Environment Variables ----------
 CLIENT_ID = os.environ.get("CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("REDIRECT_URI")
@@ -365,10 +364,12 @@ async def on_command_error(ctx, error):
 @is_authorized()
 async def setup_verify(ctx, role: discord.Role, emoji: str = "✅", banner_url: str = None, *, description: str = None):
     final_banner = banner_url if banner_url else BACKGROUND_IMAGE_URL
+    if not (final_banner.startswith("http://") or final_banner.startswith("https://")):
+        final_banner = BACKGROUND_IMAGE_URL
+
     final_description = description if description else f"กดปุ่มด้านล่างเลยKub กดรับยศจะได้ยศ {role.mention}"
 
     embed = discord.Embed(
-        title="รับยศ",
         description=final_description,
         color=discord.Color.blurple()
     )
@@ -383,7 +384,10 @@ async def setup_verify(ctx, role: discord.Role, emoji: str = "✅", banner_url: 
     )
     embed.timestamp = discord.utils.utcnow()
 
-    view = VerifyView(ctx.guild.id, role.id, ctx.guild.name, emoji=emoji)
+    try:
+        view = VerifyView(ctx.guild.id, role.id, ctx.guild.name, emoji=emoji)
+    except Exception:
+        view = VerifyView(ctx.guild.id, role.id, ctx.guild.name, emoji="✅")
 
     await ctx.send(embed=embed, view=view)
 
